@@ -11,6 +11,8 @@ import { Chip, Screen } from "./Screen.tsx";
 import { EncoderPages, type EncoderPage } from "./Encoder.tsx";
 import { Spectrogram } from "./Spectrogram.tsx";
 import { CreatureTubes } from "./CreatureTubes.tsx";
+import { TUNES } from "../../song/tunes.ts";
+import { singChicken, useChickenSing } from "../chickenSing.ts";
 
 /** Thumbnail: the creature's outline in blue with its airway traced in amber. */
 const Thumb = memo(function Thumb({ def }: { def: CreatureDef }) {
@@ -62,9 +64,16 @@ function CallActions({ def }: { def: CreatureDef }) {
     setLast(id);
     playCall(id);
   };
+  const sings = def.id === "chicken";
   const again = sounding ?? (def.calls.find((c) => c.id === last) ?? def.calls[0])?.id;
+  const sing = () => {
+    if (sounding === "sing") return engine.stopCall();
+    setLast("sing");
+    void singChicken();
+  };
   return (
-    <ActionBar label="Calls" onSpace={() => again && press(again)}>
+    <ActionBar label="Calls" onSpace={() => (again === "sing" || (sings && last === "sing") ? sing() : again && press(again))}>
+      {sings && <PrimaryButton className="act-call" label="Sing" playing={sounding === "sing"} pressed={last === "sing"} title="Sing the words below to the tune" onClick={sing} />}
       {def.calls.map((c) => (
         <PrimaryButton key={c.id} className="act-call" label={c.name} playing={sounding === c.id} pressed={last === c.id} title={c.hint} onClick={() => press(c.id)} />
       ))}
@@ -119,6 +128,31 @@ function Params({ def }: { def: CreatureDef }) {
   );
 }
 
+/** The chicken's words and the tune it sings them to (Sing, in the calls above, sings them). */
+function ChickenLyrics() {
+  const lyrics = useChickenSing((s) => s.lyrics);
+  const setLyrics = useChickenSing((s) => s.setLyrics);
+  return (
+    <div className="lyrics chicken-lyrics">
+      <textarea
+        value={lyrics}
+        onChange={(e) => setLyrics(e.target.value)}
+        onKeyDown={(e) => e.stopPropagation()}
+        rows={Math.min(4, Math.max(2, lyrics.split("\n").length))}
+        aria-label="Words for the chicken to sing"
+        placeholder="Type the words to sing"
+        title="Each syllable becomes a chicken gesture: b, p, m close the beak; k, g, h close the larynx; vowels set the beak gape and throat. A line goes to each phrase of the tune."
+      />
+    </div>
+  );
+}
+
+function ChickenTune() {
+  const tune = useChickenSing((s) => s.tune);
+  const setTune = useChickenSing((s) => s.setTune);
+  return <Menu label="Tune" icon="note" value={tune} options={TUNES.map((t) => ({ value: t.id, label: t.name }))} onChange={setTune} />;
+}
+
 /** Bestiary's right column: the calls, the creatures, the waterfall, the controls, the airway, the keys. */
 export function BestiaryRight() {
   const creature = useStore((s) => s.creature);
@@ -126,6 +160,11 @@ export function BestiaryRight() {
   return (
     <div className="right right-bestiary">
       {def && <CallActions def={def} />}
+      {def?.id === "chicken" && (
+        <Screen className="s-csing" title="Sing" sub="Words for the chicken" tools={<ChickenTune />}>
+          <ChickenLyrics />
+        </Screen>
+      )}
       <Screen className="s-gallery" title="Creatures">
         <Gallery />
       </Screen>

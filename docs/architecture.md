@@ -9,7 +9,7 @@ ambitious. Sophisticated throat, lips, tongue modeling. Different animals: human
 etc. Tonal and percussive (beatboxing). Beautiful visuals/diagrams, dynamic animations based on
 params."
 
-**Not built (yet):** the design's wider bestiary (only songbird, seal, alligator and elephant
+**Not built (yet):** the design's wider bestiary (only songbird, seal, alligator, elephant and chicken
 exist), the two-mass vocal folds, an IPA chart mode, the app-side EQ/reverb/limiter chain and
 in-app WAV export (the CLI renders WAVs; the app has a close-mic chain in WebAudio). Treat the
 code as the truth where this file disagrees.

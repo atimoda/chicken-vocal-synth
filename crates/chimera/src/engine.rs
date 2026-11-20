@@ -155,6 +155,13 @@ impl Engine {
         }
     }
 
+    /// Play a score of call keys on the creature (a sung melody; see `CreatureVoice::play_score`).
+    pub fn play_score(&mut self, keys: &[crate::creatures::types::CallKey]) {
+        if let Some(c) = self.creature.as_mut() {
+            c.play_score(keys, 1.0);
+        }
+    }
+
     pub fn stop_call(&mut self) {
         if let Some(c) = self.creature.as_mut() {
             c.stop_call();

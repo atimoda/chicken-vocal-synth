@@ -12,6 +12,12 @@ import { connectMidi, disconnectMidi, type MidiStatus } from "./midi.ts";
 
 export type Mode = "play" | "speak" | "sing" | "bestiary" | "beatbox";
 
+const MODES: readonly Mode[] = ["play", "speak", "sing", "bestiary", "beatbox"];
+/** `?mode=bestiary&creature=chicken` opens there (a page that embeds or links one creature) */
+const opening = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
+const openMode = opening.get("mode") as Mode | null;
+const openCreature = opening.get("creature");
+
 export interface BeatState {
   steps: (BeatStep | null)[];
   bpm: number;
@@ -163,7 +169,7 @@ export const useStore = create<State>((set, get) => ({
   heldNotes: [],
   view: { pressure: true, particles: true, grid: false, calipers: true, threeD: false },
   // the app opens on Sing: hearing a song is the quickest way in (the plugin opens there too)
-  mode: "sing",
+  mode: openMode && MODES.includes(openMode) ? openMode : "sing",
   setMode: (m) => {
     const prev = get().mode;
     if (prev === m) return;
@@ -204,7 +210,7 @@ export const useStore = create<State>((set, get) => ({
     }
     updateGate(get());
   },
-  creature: "songbird",
+  creature: openCreature && creatureById(openCreature) ? openCreature : "songbird",
   cparams: {},
   keyCall: null,
   setKeyCall: (id) => {

@@ -155,6 +155,8 @@ pub struct CallPlan {
     pub owns: Vec<usize>,
     /// `owns` as a mask over the params
     pub owns_mask: Vec<bool>,
+    /// per name (as in `names`), the keys that set it: (time, value, curve), in key order
+    pub tracks: Vec<Vec<(f64, f64, Option<Curve>)>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -177,38 +179,45 @@ impl CallDef {
     }
 
     fn resolve(&mut self, params: &[ParamDef], events: &[&'static str]) {
-        let target = |n: &str| -> CallTarget {
-            if n == "gate" {
-                CallTarget::Gate
-            } else if let Some(e) = n.strip_prefix('!') {
-                CallTarget::Event(events.iter().position(|x| *x == e))
-            } else if let Some(i) = params.iter().position(|p| p.key == n) {
-                CallTarget::Param(i)
-            } else {
-                CallTarget::Unknown
-            }
-        };
-        let keys: Vec<PlanKey> = self.keys.iter().map(|k| PlanKey { t: k.t, v: k.v.0.iter().map(|(n, x)| (target(n), *x)).collect(), curve: k.curve }).collect();
-        let mut names = Vec::new();
-        let mut owns = Vec::new();
-        for k in &keys {
-            for (n, _) in &k.v {
-                if *n != CallTarget::Unknown && !names.contains(n) {
-                    names.push(*n);
-                }
-                if let CallTarget::Param(i) = n
-                    && !owns.contains(i)
-                {
-                    owns.push(*i);
-                }
-            }
-        }
-        let mut owns_mask = vec![false; params.len()];
-        for &i in &owns {
-            owns_mask[i] = true;
-        }
-        self.plan = CallPlan { keys, names, owns, owns_mask };
+        self.plan = plan_keys(&self.keys, params, events);
     }
+}
+
+/// Resolve call keys' names against a creature's params and events into a playback plan (see
+/// [`CallPlan`]). Calls do this once when their creature is built; a sung score, when it is played.
+pub fn plan_keys(keys: &[CallKey], params: &[ParamDef], events: &[&'static str]) -> CallPlan {
+    let target = |n: &str| -> CallTarget {
+        if n == "gate" {
+            CallTarget::Gate
+        } else if let Some(e) = n.strip_prefix('!') {
+            CallTarget::Event(events.iter().position(|x| *x == e))
+        } else if let Some(i) = params.iter().position(|p| p.key == n) {
+            CallTarget::Param(i)
+        } else {
+            CallTarget::Unknown
+        }
+    };
+    let keys: Vec<PlanKey> = keys.iter().map(|k| PlanKey { t: k.t, v: k.v.0.iter().map(|(n, x)| (target(n), *x)).collect(), curve: k.curve }).collect();
+    let mut names = Vec::new();
+    let mut owns = Vec::new();
+    for k in &keys {
+        for (n, _) in &k.v {
+            if *n != CallTarget::Unknown && !names.contains(n) {
+                names.push(*n);
+            }
+            if let CallTarget::Param(i) = n
+                && !owns.contains(i)
+            {
+                owns.push(*i);
+            }
+        }
+    }
+    let mut owns_mask = vec![false; params.len()];
+    for &i in &owns {
+        owns_mask[i] = true;
+    }
+    let tracks = names.iter().map(|n| keys.iter().filter_map(|k| k.v.iter().find(|(m, _)| m == n).map(|&(_, x)| (k.t, x, k.curve))).collect()).collect();
+    CallPlan { keys, names, owns, owns_mask, tracks }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]

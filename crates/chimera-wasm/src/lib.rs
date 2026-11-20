@@ -528,6 +528,38 @@ pub unsafe extern "C" fn engine_play_call(h: *mut Handle, index: usize, pitch: f
     handle!(h).engine.play_call(index, opt(pitch), opt(amp));
 }
 
+/// The chicken sings: `{"notes": [SungNote], "options": ChickenSingOptions}` as UTF-8 JSON at
+/// `ptr..ptr+len`, played from now as the creature's call `"sing"` (telemetry reports it as call
+/// index −2). Allocates (not real-time), as a creature switch does. Returns 0 with
+/// `{keys, end}` (the score's length in keys and seconds), or 1 with `{error}`.
+///
+/// # Safety
+/// `h` must be a live handle; `ptr..ptr+len` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_creature_sing(h: *mut Handle, ptr: *const u8, len: usize) -> u32 {
+    use chimera::creatures::chicken_sing::{ChickenSingOptions, sing_keys};
+    use chimera::phonetics::sing::SungNote;
+    #[derive(serde::Deserialize)]
+    struct Req {
+        notes: Vec<SungNote>,
+        #[serde(default)]
+        options: Option<ChickenSingOptions>,
+    }
+    let h = handle!(h);
+    let bytes = unsafe { core::slice::from_raw_parts(ptr, len) };
+    let req: Req = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(e) => return api::set_result(Err(format!("bad request: {e}"))),
+    };
+    if h.engine.creature().map(|c| c.def.id) != Some("chicken") {
+        return api::set_result(Err("only the chicken sings".into()));
+    }
+    let keys = sing_keys(&req.notes, &req.options.unwrap_or_default());
+    let end = keys.iter().map(|k| k.t).fold(0.0, f64::max);
+    h.engine.play_score(&keys);
+    api::set_result(Ok(serde_json::json!({ "keys": keys.len(), "end": end })))
+}
+
 /// # Safety
 /// `h` must be a live handle.
 #[unsafe(no_mangle)]
@@ -536,7 +568,7 @@ pub unsafe extern "C" fn engine_stop_call(h: *mut Handle) {
 }
 
 /// Take the creature's telemetry (resets its RMS measurements) into a flat f64 block: gate,
-/// outRms, clock, the active call's index (−1: none), the params in def order, then per tube (in
+/// outRms, clock, the active call's index (−1: none, −2: a sung score), the params in def order, then per tube (in
 /// the switch's `tubes` order) its areas then its RMS, then the source values. Null when the human
 /// voice is playing.
 ///
@@ -552,6 +584,7 @@ pub unsafe extern "C" fn engine_creature_telemetry(h: *mut Handle) -> *const f64
     let b = &mut h.ctele_block;
     b.clear();
     let call = match (t.call, h.engine.creature()) {
+        (Some(chimera::creatures::voice::SCORE_ID), Some(_)) => -2.0,
         (Some(id), Some(c)) => c.def.call_index(id).map_or(-1.0, |i| i as f64),
         _ => -1.0,
     };
