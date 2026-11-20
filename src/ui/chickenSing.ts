@@ -12,7 +12,7 @@ import { g2p } from "./speech.ts";
 import { useStore } from "./store.ts";
 import { useSing } from "./singing.ts";
 
-export const CHICKEN_LYRICS = "Buk buk buk, ba-gawk!\nI laid an egg for you.";
+export const CHICKEN_LYRICS = "Buk buk buk, bah gawk!\nI laid an egg for you.";
 
 interface ChickenSingState {
   lyrics: string;
