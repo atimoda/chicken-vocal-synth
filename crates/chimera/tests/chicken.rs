@@ -139,3 +139,28 @@ fn a_bigger_bird_has_a_longer_trachea_and_lower_resonances() {
     let (chick, rooster) = (centroid(0.0), centroid(1.0));
     assert!(rooster < chick * 0.8, "rooster {rooster} vs chick {chick} crossings");
 }
+
+#[test]
+fn the_chicken_holds_at_every_device_rate() {
+    // a Bluetooth headset runs the page at 16 kHz (32 kHz inside, where a section under 1.2 cm
+    // rings); every body must sound about as loud as at 48 kHz
+    for size in [0.0, 0.6, 1.0] {
+        let held = |fs: f64| {
+            chimera::creatures::init();
+            let def = creature_by_id("chicken").unwrap();
+            let mut v = CreatureVoice::new(def, fs, &[(def.param_index("size").unwrap(), size)]);
+            v.set_gate(1.0);
+            let mut out = vec![0f32; fs as usize];
+            for b in out.chunks_mut(128) {
+                v.render(b);
+            }
+            assert!(out.iter().all(|x| x.is_finite()), "size {size} at {fs} Hz went NaN");
+            rms(&out[out.len() / 2..])
+        };
+        let reference = held(48000.0);
+        for fs in [16000.0, 22050.0, 32000.0, 44100.0, 96000.0] {
+            let r = held(fs);
+            assert!(r > 0.5 * reference && r < 2.0 * reference, "size {size} at {fs} Hz: RMS {r:.4}, 48 kHz {reference:.4}");
+        }
+    }
+}

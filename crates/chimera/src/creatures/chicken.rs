@@ -20,7 +20,7 @@
 //! Anatomy numbers are textbook ranges (King & McLelland, *Form and Function in Birds*), not
 //! measurements of one bird.
 
-use super::build::{TubeArea, TubeOpts, fill_areas, tube};
+use super::build::{TubeArea, TubeOpts, dx_min, fill_areas, tube};
 use super::types::{CallDef, CallKey, CreatureDef, CreatureGroup, CreatureSim, Curve, GateTimes, ParamDef};
 use crate::airway::network::{AirwayNetwork, NoiseSpec, PortSpec, Tube};
 use crate::math::{Drift, cbrt, js_max, js_min, lerp, pow};
@@ -30,7 +30,7 @@ use crate::sources::syrinx::SyrinxLabia;
 /// largest opening of one syringeal valve (cm²)
 const AMAX: f64 = 0.05;
 /// turbulence noise gain (breath through the larynx; half of it at the syrinx)
-const NOISE_K: f64 = 1e-4;
+const NOISE_K: f64 = 0.707e-4;
 
 /// the trachea is built at the chick's length (the finest grid) and only grows from there, so the
 /// grid never gets finer than the CFL limit at any `size`
@@ -71,6 +71,9 @@ pub struct Chicken {
     voice: f64,
     /// valve swing (cm²): wider for low notes, as a membrane vibrating slowly swings further
     amax: f64,
+    /// the shortest the trachea and beak can be at this rate (they are built at these lengths)
+    trachea_min: f64,
+    beak_min: f64,
     trachea_areas: Vec<f64>,
     beak_areas: Vec<f64>,
     noise: [NoiseSpec; 2],
@@ -78,9 +81,17 @@ pub struct Chicken {
 
 fn create(fs: f64) -> Box<dyn CreatureSim> {
     let mut net = AirwayNetwork::new(fs);
-    let bron_l = tube(&mut net, "bronchusL", fs, 1.0, TubeArea::Uniform(0.07), TubeOpts::default());
-    let bron_r = tube(&mut net, "bronchusR", fs, 1.0, TubeArea::Uniform(0.07), TubeOpts::default());
-    let trachea = tube(&mut net, "trachea", fs, TRACHEA_MIN, TubeArea::Uniform(0.15), TubeOpts { wall: Some(WALL_TRACHEA), max: Some(60.0), ..Default::default() });
+    // Every tube is built no shorter than its sections can be at this rate (a section under the
+    // CFL length rings: see engine.rs `the_voice_holds_for_a_child_at_low_device_rates`). At 96 kHz
+    // and up that changes nothing; on a 16 kHz device (32 kHz inside) the chick's beak and trachea
+    // come out a little long.
+    let floor = |n: f64| n * dx_min(fs) * 1.02;
+    let short = TubeOpts { min: Some(2.0), ..Default::default() };
+    let bron_len = js_max(1.0, floor(2.0));
+    let bron_l = tube(&mut net, "bronchusL", fs, bron_len, TubeArea::Uniform(0.07), short);
+    let bron_r = tube(&mut net, "bronchusR", fs, bron_len, TubeArea::Uniform(0.07), short);
+    let trachea_min = js_max(TRACHEA_MIN, floor(3.0));
+    let trachea = tube(&mut net, "trachea", fs, trachea_min, TubeArea::Uniform(0.15), TubeOpts { wall: Some(WALL_TRACHEA), max: Some(60.0), ..Default::default() });
     let sac = net.add_pressure_node("air sac");
     net.add_port(sac, bron_l.first_node(), PortSpec::new(0.12, 0.5));
     net.add_port(sac, bron_r.first_node(), PortSpec::new(0.12, 0.5));
@@ -88,7 +99,8 @@ fn create(fs: f64) -> Box<dyn CreatureSim> {
     let v_r = net.add_port(bron_r.last_node(), trachea.first_node(), PortSpec::new(0.0, 0.1).kinetic(0.5, 1.0));
     let oec = net.add_cavity("oropharynx", 1.5, None);
     let larynx = net.add_port(trachea.last_node(), oec, PortSpec::new(0.12, 0.3).kinetic(0.4, 1.0));
-    let beak = tube(&mut net, "beak", fs, BEAK_MIN, TubeArea::Uniform(0.4), TubeOpts::default());
+    let beak_min = js_max(BEAK_MIN, floor(2.0));
+    let beak = tube(&mut net, "beak", fs, beak_min, TubeArea::Uniform(0.4), short);
     let throat_beak = net.connect(oec, beak.first_node());
     net.add_radiation(beak.last_node());
     net.finalize();
@@ -115,6 +127,8 @@ fn create(fs: f64) -> Box<dyn CreatureSim> {
         leak: 0.0,
         voice: 1.0,
         amax: AMAX,
+        trachea_min,
+        beak_min,
         trachea_areas: vec![0.0; trachea.n],
         beak_areas: vec![0.0; beak.n],
         noise,
@@ -156,7 +170,7 @@ impl CreatureSim for Chicken {
         self.amax = AMAX * js_max(0.6, js_min(3.0, 600.0 / f0));
         self.leak = 0.004 + 0.03 * p[BREATH];
         // body: trachea length and bore, throat volume and beak length all scale with size
-        let len = lerp(TRACHEA_MIN, TRACHEA_MAX, size);
+        let len = js_max(self.trachea_min, lerp(TRACHEA_MIN, TRACHEA_MAX, size));
         let bore = lerp(0.05, 0.2, size);
         let areas = fill_areas(self.trachea, |_| bore, &mut self.trachea_areas);
         self.net.set_tube_targets(self.trachea, areas, Some(len), None);
@@ -165,7 +179,7 @@ impl CreatureSim for Chicken {
         let throat = p[THROAT] * lerp(0.25, 1.0, size);
         self.net.set_node_area_target(self.oec, throat / cbrt(1.5));
         let gape = p[GAPE];
-        let beak_len = lerp(BEAK_MIN, BEAK_MAX, size);
+        let beak_len = js_max(self.beak_min, lerp(BEAK_MIN, BEAK_MAX, size));
         let scale = lerp(0.35, 1.0, size);
         let areas = fill_areas(self.beak, |u| scale * (0.03 + gape * (0.2 + 0.9 * u)), &mut self.beak_areas);
         self.net.set_tube_targets(self.beak, areas, Some(beak_len), None);
@@ -276,7 +290,9 @@ pub fn def() -> CreatureDef {
         group: CreatureGroup::Bird,
         blurb: "Air sacs push breath through a syrinx at the foot of a long ringed trachea; the larynx and beak cut the call into syllables.",
         role: "Clucky lead vocals, cackling hooks, a rooster's crow",
-        oversample: 4,
+        // 96 kHz inside: a third of the 4x cost, and the same sound (calls and songs compared by
+        // spectrogram; the noise gain is set for this rate)
+        oversample: 2,
         gate_times: Some(GateTimes { attack: 0.006, release: 0.02 }),
         params: vec![
             ParamDef::new("pitch", "Syrinx pitch", 150.0, 5000.0, 380.0).unit("Hz").log().smooth(0.01).pitch(),
