@@ -26,6 +26,9 @@ usage: chimera <command> [args] [--float]
                  --artic also writes the articulators at 100 Hz)
   render beatbox [outdir] [preset name | pattern] [male|female|child] [bpm] [bars]
   render creature [creatureId] [outdir]
+  render chicken <in.json | \"demo song name\"> [out] [--size 0..1] [--shift st] [--bpm n]
+                 [--harsh 0..1] [--rough 0..1] [--staccato 0..1] [--pressure kPa]
+                 (the chicken sings a melody file, as render notes reads it, or a demo song)
   render vowels  [male|female|child] [out]
   syllables      \"lyrics\" [en|tr]  (what the language front ends read: one JSON syllable per sung
                  note; tr reads Latin script as Turkish)
@@ -112,6 +115,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 "notes" => render::notes(&ctx, rest),
                 "beatbox" => render::beatbox(&ctx, rest),
                 "creature" => render::creature(&ctx, rest),
+                "chicken" => render::chicken(&ctx, rest),
                 "vowels" => render::vowels(&ctx, rest),
                 _ => Err(format!("unknown render kind {kind:?}\n\n{USAGE}")),
             }

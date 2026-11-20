@@ -176,6 +176,14 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       case "stopCall":
         x.engine_stop_call(h);
         break;
+      case "creatureSing":
+        // only the chicken sings; any other creature reports an error, which leaves it as it was
+        try {
+          this.engineJson("engine_creature_sing", { notes: m.notes, options: m.options });
+        } catch {
+          // nothing to sing
+        }
+        break;
     }
   }
 
@@ -250,7 +258,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     }
     const source: Record<string, number> = {};
     for (const k of c.sources) source[k] = b[o++];
-    return { kind: "creature", id: c.id, params, gate, outRms, clock, tubes, source, call: call >= 0 ? c.calls[call] : null };
+    return { kind: "creature", id: c.id, params, gate, outRms, clock, tubes, source, call: call >= 0 ? c.calls[call] : call === -2 ? "sing" : null };
   }
 }
 

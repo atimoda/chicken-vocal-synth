@@ -7,7 +7,7 @@
 //! allocate nothing. Parameters and calls are addressed by index ([`CreatureDef::param_index`],
 //! [`CreatureDef::call_index`]).
 
-use super::types::{CallTarget, CreatureDef, CreatureSim, Curve, GateTimes};
+use super::types::{CallKey, CallPlan, CallTarget, CreatureDef, CreatureSim, Curve, GateTimes, plan_keys};
 use crate::airway::decimator::Decimator;
 use crate::airway::network::tiny;
 use crate::math::{PI, exp, js_max, js_min, js_round, js_sign, pow, sqrt, tanh};
@@ -93,12 +93,17 @@ impl Serialize for CreatureTelemetry {
 
 #[derive(Clone, Copy, Debug)]
 struct ActiveCall {
-    /// index into the def's calls
+    /// index into the def's calls, or [`SCORE`]
     call: usize,
     t0: f64,
     pitch: f64,
     amp: f64,
 }
+
+/// [`ActiveCall::call`] of a sung score (see [`CreatureVoice::play_score`])
+const SCORE: usize = usize::MAX;
+/// the id a sung score reports as its call
+pub const SCORE_ID: &str = "sing";
 
 const DEFAULT_GATE_TIMES: GateTimes = GateTimes { attack: 0.012, release: 0.06 };
 
@@ -123,6 +128,10 @@ pub struct CreatureVoice {
     call_gate: f64,
     pub clock: f64,
     call: Option<ActiveCall>,
+    /// the sung score [`play_score`](Self::play_score) installed (empty until then)
+    score: CallPlan,
+    /// per name of the score, the index into its track of the last key at or before now
+    cursor: Vec<usize>,
     /// one-shot events already fired, per key of the active call (preallocated for the longest call)
     fired: Vec<bool>,
     dec: Decimator,
@@ -174,6 +183,8 @@ impl CreatureVoice {
             call_gate: 0.0,
             clock: 0.0,
             call: None,
+            score: CallPlan::default(),
+            cursor: Vec::new(),
             fired: Vec::with_capacity(max_keys),
             dec: Decimator::new(m),
             ctrl_every,
@@ -219,7 +230,7 @@ impl CreatureVoice {
             }
             let v = js_min(d.max, js_max(d.min, x));
             self.performer[k] = v;
-            let owned = self.call.is_some_and(|c| self.def.calls[c.call].plan.owns_mask[k]);
+            let owned = self.call.is_some_and(|c| self.plan_of(c.call).owns_mask[k]);
             if !owned {
                 self.target[k] = v;
             }
@@ -252,6 +263,27 @@ impl CreatureVoice {
         }
     }
 
+    /// Play a score of call keys (a sung phrase, built off the audio thread: see
+    /// `creatures::chicken::sing_keys`). It plays like a call, from now, and replaces any call
+    /// playing. Resolving it allocates, as switching creature does; rendering it does not.
+    pub fn play_score(&mut self, keys: &[CallKey], amp: f64) {
+        self.end_call();
+        if keys.is_empty() {
+            return;
+        }
+        let mut keys = keys.to_vec();
+        keys.sort_by(|a, b| a.t.total_cmp(&b.t));
+        self.score = plan_keys(&keys, &self.def.params, &self.def.events);
+        self.cursor.clear();
+        self.cursor.resize(self.score.names.len(), 0);
+        self.call = Some(ActiveCall { call: SCORE, t0: self.clock, pitch: 1.0, amp });
+    }
+
+    /// The plan of a call index, or of the sung score.
+    fn plan_of(&self, call: usize) -> &CallPlan {
+        if call == SCORE { &self.score } else { &self.def.calls[call].plan }
+    }
+
     pub fn stop_call(&mut self) {
         self.end_call();
     }
@@ -259,7 +291,8 @@ impl CreatureVoice {
     /// End the active call and hand its parameters back to the performer.
     fn end_call(&mut self) {
         if let Some(c) = self.call {
-            for &n in &self.def.calls[c.call].plan.owns {
+            let plan = if c.call == SCORE { &self.score } else { &self.def.calls[c.call].plan };
+            for &n in &plan.owns {
                 self.target[n] = self.performer[n];
             }
         }
@@ -269,7 +302,7 @@ impl CreatureVoice {
 
     pub fn active_call(&self) -> Option<&'static str> {
         let def = self.def;
-        self.call.map(|c| def.calls[c.call].id)
+        self.call.map(|c| if c.call == SCORE { SCORE_ID } else { def.calls[c.call].id })
     }
 
     /// Evaluate the active call's automation at the current clock (writes into targets).
@@ -277,24 +310,44 @@ impl CreatureVoice {
         let Some(c) = self.call else { return };
         let t = self.clock - c.t0;
         let def = self.def;
-        let plan = &def.calls[c.call].plan;
+        // the score is taken out while it plays this step (it is put back below), so it can be
+        // read while the targets are written
+        let score = core::mem::take(&mut self.score);
+        let is_score = c.call == SCORE;
+        let plan = if is_score { &score } else { &def.calls[c.call].plan };
         let keys = &plan.keys;
-        let last = &keys[keys.len() - 1];
-        if t > last.t + 0.05 {
+        if t > keys[keys.len() - 1].t + 0.05 {
+            self.score = score;
             self.end_call();
             return;
         }
-        for &n in &plan.names {
-            // find surrounding keys that define n
+        for (ni, &n) in plan.names.iter().enumerate() {
+            // the keys either side of t that set n
             let mut prev: Option<(f64, f64)> = None;
             let mut next: Option<(f64, f64, Option<Curve>)> = None;
-            for k in keys {
-                let Some(&(_, x)) = k.v.iter().find(|(m, _)| *m == n) else { continue };
-                if k.t <= t {
-                    prev = Some((k.t, x));
-                } else {
-                    next = Some((k.t, x, k.curve));
-                    break;
+            if is_score {
+                // a score can be a whole song: walk each name's own keys with a cursor (t only
+                // grows) instead of scanning every key
+                let track = &plan.tracks[ni];
+                let cur = &mut self.cursor[ni];
+                while *cur + 1 < track.len() && track[*cur + 1].0 <= t {
+                    *cur += 1;
+                }
+                if let Some(&(kt, x, _)) = track.get(*cur)
+                    && kt <= t
+                {
+                    prev = Some((kt, x));
+                    next = track.get(*cur + 1).copied();
+                }
+            } else {
+                for k in keys {
+                    let Some(&(_, x)) = k.v.iter().find(|(m, _)| *m == n) else { continue };
+                    if k.t <= t {
+                        prev = Some((k.t, x));
+                    } else {
+                        next = Some((k.t, x, k.curve));
+                        break;
+                    }
                 }
             }
             let Some((prev_t, prev_x)) = prev else { continue };
@@ -322,18 +375,21 @@ impl CreatureVoice {
                 }
             }
         }
-        // one-shot events
-        for (i, k) in keys.iter().enumerate() {
-            if k.t > t || self.fired[i] {
-                continue;
-            }
-            for &(n, amount) in &k.v {
-                if let CallTarget::Event(Some(e)) = n {
-                    self.sim.trigger(e, amount * c.amp);
+        // one-shot events (a score has none: its keys only set the gate and params)
+        if !is_score {
+            for (i, k) in keys.iter().enumerate() {
+                if k.t > t || self.fired[i] {
+                    continue;
                 }
+                for &(n, amount) in &k.v {
+                    if let CallTarget::Event(Some(e)) = n {
+                        self.sim.trigger(e, amount * c.amp);
+                    }
+                }
+                self.fired[i] = true;
             }
-            self.fired[i] = true;
         }
+        self.score = score;
     }
 
     fn control(&mut self) {

@@ -337,6 +337,23 @@ export interface CreatureDef {
   visual: import("../ui/creatureVisuals.ts").CreatureVisual;
 }
 
+/** How the chicken sings a melody (Rust's `ChickenSingOptions`; what is left out takes its default). */
+export interface ChickenSingOptions {
+  bpm?: number;
+  /** semitones added to every note */
+  shift?: number;
+  /** chick 0 ↔ hen 0.6 ↔ rooster 1 */
+  size?: number;
+  /** air-sac pressure between accents (kPa) */
+  pressure?: number;
+  harsh?: number;
+  rough?: number;
+  /** 0 legato … 1 clucky staccato between words */
+  staccato?: number;
+  /** when the first beat falls (s from now); its onset consonants come before */
+  t0?: number;
+}
+
 export interface CreatureTelemetry {
   kind: "creature";
   id: string;

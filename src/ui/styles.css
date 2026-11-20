@@ -2504,9 +2504,13 @@ input[type="range"]::-moz-range-thumb {
    the column the height it was */
 .right-bestiary {
   grid-template-columns: minmax(0, 342fr) minmax(0, 342fr);
-  grid-template-rows: auto minmax(min-content, 196fr) minmax(min-content, 196fr) auto auto;
-  grid-template-areas: "act act" "gallery gallery" "wf airway" "cparams cparams" "keys keys";
+  grid-template-rows: auto auto minmax(min-content, 196fr) minmax(min-content, 196fr) auto auto;
+  grid-template-areas: "act act" "csing csing" "gallery gallery" "wf airway" "cparams cparams" "keys keys";
 }
+
+/* the chicken's words (only the chicken sings): as tall as the words */
+.s-csing { grid-area: csing; }
+.s-csing .screen-body { min-height: 0; }
 
 .s-gallery { grid-area: gallery; }
 .s-cparams { grid-area: cparams; }
@@ -2523,7 +2527,7 @@ input[type="range"]::-moz-range-thumb {
   inset: 0;
   padding: 4px 14px 12px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2574,9 +2578,9 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* five across leaves too little room for a whole binomial on one line: it wraps under */
+  letter-spacing: 0.06em;
+  line-height: 1.35;
   max-width: 100%;
 }
 
@@ -2597,7 +2601,7 @@ input[type="range"]::-moz-range-thumb {
 @media (max-width: 1100px) {
   .right-bestiary {
     grid-template-rows: none;
-    grid-template-areas: "act act" "gallery gallery" "wf wf" "cparams cparams" "airway airway" "keys keys";
+    grid-template-areas: "act act" "csing csing" "gallery gallery" "wf wf" "cparams cparams" "airway airway" "keys keys";
   }
   .right-bestiary .screen-body {
     min-height: 190px;
@@ -2613,7 +2617,7 @@ input[type="range"]::-moz-range-thumb {
 @media (max-width: 640px) {
   .right-bestiary {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "act" "gallery" "wf" "cparams" "airway" "keys";
+    grid-template-areas: "act" "csing" "gallery" "wf" "cparams" "airway" "keys";
   }
   .s-gallery .specimens {
     grid-template-columns: repeat(2, minmax(0, 1fr));

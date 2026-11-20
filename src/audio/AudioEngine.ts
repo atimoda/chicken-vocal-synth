@@ -6,7 +6,7 @@ import workletUrl from "../worklet/processor.ts?worker&url";
 import { chimeraModule } from "../wasm/chimera.ts";
 import { preferPlaybackSession } from "./session.ts";
 import type { ToWorklet, FromWorklet, TelemetryMessage, PlannedMessage, CreatureTelemetryMessage } from "../worklet/protocol.ts";
-import type { BodyMix } from "../wasm/types.ts";
+import type { BodyMix, ChickenSingOptions, SungNote } from "../wasm/types.ts";
 import type { HumanArtic } from "../wasm/types.ts";
 import type { VoiceSource } from "../wasm/types.ts";
 
@@ -299,6 +299,11 @@ export class AudioEngine {
 
   stopCall(): void {
     this.send({ type: "stopCall" });
+  }
+
+  /** The chicken sings these notes, from now (Stop is `stopCall`). */
+  creatureSing(notes: SungNote[], options: ChickenSingOptions): void {
+    this.send({ type: "creatureSing", notes, options });
   }
 
   stopSpeech(): void {

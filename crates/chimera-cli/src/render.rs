@@ -846,6 +846,91 @@ pub fn creature(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The chicken sings a melody: `render chicken <in.json | demo song name> [out] [--size x]
+/// [--shift st] [--bpm n] [--harsh x] [--rough x] [--staccato x] [--pressure kPa]`. The JSON is
+/// `render notes`'s melody (`bpm`, `notes`, and `lyrics` or `syllables`); a demo song's name
+/// ("Daisy Bell") sings that song.
+pub fn chicken(ctx: &Ctx, a: &[String]) -> Result<(), String> {
+    use chimera::creatures::chicken_sing::{ChickenSingOptions, sing_keys};
+    let mut o = ChickenSingOptions::default();
+    let mut rest = Vec::new();
+    let mut it = a.iter();
+    let mut bpm: Option<f64> = None;
+    while let Some(x) = it.next() {
+        if let Some(name) = x.strip_prefix("--") {
+            let v: f64 = it.next().and_then(|v| v.parse().ok()).ok_or(format!("--{name} needs a number"))?;
+            match name {
+                "size" => o.size = v,
+                "shift" => o.shift = v,
+                "bpm" => bpm = Some(v),
+                "harsh" => o.harsh = v,
+                "rough" => o.rough = v,
+                "staccato" => o.staccato = v,
+                "pressure" => o.pressure = v,
+                _ => return Err(format!("unknown option --{name}")),
+            }
+        } else {
+            rest.push(x.clone());
+        }
+    }
+    let input = rest.first().ok_or("render chicken <in.json | demo song name> [out] [--size 0..1] [--shift st] [--bpm n]")?;
+    let (notes, song_bpm, name) = if let Some(song) = DEMO_SONGS.iter().find(|s| s.name.eq_ignore_ascii_case(input)) {
+        let syl = lyrics_to_syllables(song.lyrics, &g2p()?);
+        // the hen sings at the female voice's octave
+        let shift = song.octave.female * 12.0;
+        let notes: Vec<SungNote> = song.notes.iter().enumerate().map(|(i, n)| SungNote { midi: n[0] + shift, beats: n[1], syl: syl[i % syl.len()].clone() }).collect();
+        (notes, song.bpm, slug(song.name))
+    } else {
+        let text = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e} (and no demo song has that name)"))?;
+        let j: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{input}: {e}"))?;
+        let raw: Vec<[f64; 2]> = serde_json::from_value(j["notes"].clone()).map_err(|e| format!("notes: {e}"))?;
+        let syl: Vec<Syllable> = if j.get("syllables").is_some() {
+            serde_json::from_value(j["syllables"].clone()).map_err(|e| format!("syllables: {e}"))?
+        } else {
+            let lang = match j.get("lang") {
+                None => Lang::En,
+                Some(l) => serde_json::from_value(l.clone()).map_err(|e| format!("lang: {e}"))?,
+            };
+            sung_lyrics(j["lyrics"].as_str().ok_or("lyrics missing")?, lang)?
+        };
+        let sounding = raw.iter().filter(|n| n[0] > 0.0).count();
+        if syl.len() != sounding {
+            return Err(format!("{} syllables for {sounding} notes", syl.len()));
+        }
+        let mut k = 0;
+        let notes = raw
+            .iter()
+            .map(|n| {
+                let s = if n[0] > 0.0 { k += 1; syl[k - 1].clone() } else { Syllable::default() };
+                SungNote { midi: n[0], beats: n[1], syl: s }
+            })
+            .collect();
+        (notes, j["bpm"].as_f64().ok_or("bpm missing")?, "chicken".to_string())
+    };
+    o.bpm = bpm.unwrap_or(song_bpm);
+    let keys = sing_keys(&notes, &o);
+    let def = creature_by_id("chicken").ok_or("no chicken")?;
+    let mut v = CreatureVoice::new(def, FS, &[]);
+    v.play_score(&keys, 1.0);
+    let end = keys.iter().map(|k| k.t).fold(0.0, f64::max) + 0.3;
+    let mut out = vec![0f32; js_round(end * FS) as usize];
+    let t = Instant::now();
+    for block in out.chunks_mut(128) {
+        v.render(block);
+    }
+    let out_name = wav_name(arg(&rest, 1, &format!("out/chicken/{name}")));
+    ctx.write_wav(&out_name, &out)?;
+    println!(
+        "{out_name}: {} s in {} ms, peak {}, {} notes, {} keys",
+        fixed(end, 2),
+        fixed(ms_since(t), 0),
+        fixed(peak(&out), 3),
+        notes.iter().filter(|n| n.midi > 0.0).count(),
+        keys.len()
+    );
+    Ok(())
+}
+
 /// The calibrated vowels through the real-time voice; LPC formants and YIN f0 from the audio.
 /// `render vowels [body] [out]`
 pub fn vowels(ctx: &Ctx, a: &[String]) -> Result<(), String> {

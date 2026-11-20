@@ -3,7 +3,7 @@ import type { HumanArtic } from "../wasm/types.ts";
 import type { VoiceSource, VoiceTelemetry } from "../wasm/types.ts";
 import type { Segment, PlannedSegment } from "../wasm/types.ts";
 import type { Gesture } from "../wasm/types.ts";
-import type { CreatureTelemetry } from "../wasm/types.ts";
+import type { ChickenSingOptions, CreatureTelemetry, SungNote } from "../wasm/types.ts";
 import type { BeatStep, BodyMix } from "../wasm/types.ts";
 
 export interface PhraseMsg {
@@ -28,6 +28,8 @@ export type ToWorklet =
   | { type: "cparams"; values: Record<string, number> }
   | { type: "call"; id: string; pitch?: number; amp?: number }
   | { type: "stopCall" }
+  /** the chicken sings these notes (its call reads "sing" while it does) */
+  | { type: "creatureSing"; notes: SungNote[]; options: ChickenSingOptions }
   /** beatbox sequencer: any subset of its state */
   | { type: "beat"; steps?: (BeatStep | null)[]; bpm?: number; swing?: number; playing?: boolean }
   /** end the open-ended gestures with this tag now (a sung note released) */
